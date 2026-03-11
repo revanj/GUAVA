@@ -32,6 +32,8 @@ def render_set(meta_cfg,infer_model:Ubody_Gaussian_inferer,render_model:Gaussian
     os.makedirs(out_dir,exist_ok=True)
     bg=0.0
     video_ids=list(dataset.videos_info.keys())
+
+
     
     for vidx,video_id in enumerate(video_ids):
         print(f'{video_id} [{vidx+1}/{len(video_ids)}]')
@@ -67,31 +69,33 @@ def render_set(meta_cfg,infer_model:Ubody_Gaussian_inferer,render_model:Gaussian
         deform_gaussian_assets=ubody_gaussians(target_info)
         render_results=render_model(deform_gaussian_assets,target_info['render_cam_params'],bg=bg)
         
+        target_infos = []
         for idx,frame in tqdm(enumerate(frames[-test_num:])) :
             target_info=dataset._load_target_info(video_id,frame)
-            start_time = time.time()
+            target_infos.append(target_info)
+
+        for idx,frame in tqdm(enumerate(frames[-test_num:])) :
+            # target_info=dataset._load_target_info(video_id,frame)
+            target_info = target_infos[idx]
             deform_gaussian_assets=ubody_gaussians(target_info)
             render_results=render_model(deform_gaussian_assets,target_info['render_cam_params'],bg=bg)
-            render_time=time.time() - start_time
-            all_render_time+=render_time
             
-            render_image=render_results['renders'][0]
-            gt_mask=target_info['mask'][0]
-            gt_image=target_info['image'][0]*(gt_mask)+(1-gt_mask)*bg
-            torchvision.utils.save_image(gt_image, os.path.join(out_gt_path, '{0:05d}'.format(idx) + ".png"))
-            torchvision.utils.save_image(render_image, os.path.join(out_render_path, '{0:05d}'.format(idx) + ".png"))
+            # render_image=render_results['renders'][0]
+            # gt_mask=target_info['mask'][0]
+            # gt_image=target_info['image'][0]*(gt_mask)+(1-gt_mask)*bg
+            # torchvision.utils.save_image(gt_image, os.path.join(out_gt_path, '{0:05d}'.format(idx) + ".png"))
+            # torchvision.utils.save_image(render_image, os.path.join(out_render_path, '{0:05d}'.format(idx) + ".png"))
+            # cat_image=torch.cat([gt_image,render_image],dim=2)
+            # rendering_imgs.append(to8b(cat_image.detach().cpu().numpy()))
             
-            cat_image=torch.cat([gt_image,render_image],dim=2)
-            rendering_imgs.append(to8b(cat_image.detach().cpu().numpy()))
-            
-        rendering_imgs = np.stack(rendering_imgs, 0).transpose(0, 2, 3, 1)
-        imageio.mimwrite(os.path.join(out_videoid_dir, f'{video_id}_video.mp4'), rendering_imgs, fps=30, quality=8)
-        
-        render_speed=test_num/all_render_time #fps
-        speed_info['infer_time (ms)']=infer_time*1000
-        speed_info['render_speed (fps)']=render_speed
-        with open(os.path.join(out_videoid_dir,'speed_info.json'), 'w') as f:
-            json.dump(speed_info, f)
+        # rendering_imgs = np.stack(rendering_imgs, 0).transpose(0, 2, 3, 1)
+        # imageio.mimwrite(os.path.join(out_videoid_dir, f'{video_id}_video.mp4'), rendering_imgs, fps=30, quality=8)
+        # 
+        # render_speed=test_num/all_render_time #fps
+        # speed_info['infer_time (ms)']=infer_time*1000
+        # speed_info['render_speed (fps)']=render_speed
+        # with open(os.path.join(out_videoid_dir,'speed_info.json'), 'w') as f:
+        #     json.dump(speed_info, f)
 
 def render_cross_set(meta_cfg,infer_model:Ubody_Gaussian_inferer,render_model:GaussianRenderer,source_dataset:TrackedData_infer,target_dataset:TrackedData_infer,dataset_name:str,root_path:str,args):
     out_dir=os.path.join(root_path,dataset_name,) 
