@@ -81,5 +81,4 @@ class GaussianRenderer(L.LightningModule):
             "radiis": radiis,
             "depths" : depth_images,
             'extra_renders':rendered_images[:,3:4],
-            
-            }
+        }
