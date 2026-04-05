@@ -78,94 +78,45 @@ def render_set(meta_cfg,infer_model:Ubody_Gaussian_inferer,render_model:Gaussian
         import mmap
         import struct
 
-        WIDTH, HEIGHT, CHANNELS = 512, 512, 4
-        HEADER_SIZE = 16
-        DATA_SIZE = WIDTH * HEIGHT * CHANNELS
+        N_GAUSSIANS = 202640
+        BYTES_FLOAT = 4
 
-        def write_frame_fast(rgba_tensor_gpu, frame_idx):
-            rgba_u8 = (rgba_tensor_gpu.permute(1,2,0).clamp(0,1) * 255).byte()
-            pinned_buf.copy_(rgba_u8.reshape(-1), non_blocking=True)
-            torch.cuda.synchronize()
-        
-            shm.seek(HEADER_SIZE)
-            shm.write(memoryview(pinned_buf.numpy()))   # ← zero-copy write to shm
-        
-            frame_idx += 1
-            shm.seek(0)
-            shm.write(frame_idx.to_bytes(4, 'little'))
-            shm.write((1).to_bytes(4, 'little'))
-        
-        shm = mmap.mmap(-1, HEADER_SIZE + DATA_SIZE, tagname="MySharedImage")
-        pinned_buf = torch.empty(HEIGHT * WIDTH * 4, dtype=torch.uint8).pin_memory()
+        SIZE_XYZ = 3
+        SIZE_SCALE = 3
+        SIZE_ROT = 4
+
+        DATA_SIZE = (SIZE_XYZ + SIZE_SCALE + SIZE_ROT) * BYTES_FLOAT * N_GAUSSIANS
+
+        HEADER_SIZE = 4 
+
+        shm = mmap.mmap(-1, HEADER_SIZE + DATA_SIZE, tagname="SharedGaussians")
+
+        print("openning shared memory","SharedGaussians")
+        # header:
+        #   0: generating and writing gaussians
+        #   1: finished generating and writing gaussians
+
 
         while True:
             for idx,frame in tqdm(enumerate(frames[-test_num:])) :
-                # target_info=dataset._load_target_info(video_id,frame)
                 target_info = target_infos[idx]
-                deform_gaussian_assets=ubody_gaussians(target_info)
-                render_results=render_model(deform_gaussian_assets,target_info['render_cam_params'],bg=bg)
 
-                # render_image is [3, 512, 512]
-                render_image=render_results['renders'][0]
-                # depth is [1, 512, 512]
-                depth=render_results['depths'][0]
-                alpha = torch.ones_like(depth, device=depth.device)
-                alpha[depth < 0.06] = 0
-                rgba = torch.cat([render_image, alpha], dim=0).permute(1,2,0)                  # (4, 512, 512)
-                rgba = (rgba.clamp(0, 1) * 255).byte().cpu().numpy()
-                # write_frame_fast(rgba, idx)
+                gaussians=ubody_gaussians(target_info)
+
+                position = gaussians['xyz'].cpu().numpy()
+                rotation = gaussians['rotation'].cpu().numpy()
+                scale = gaussians['scaling'].cpu().numpy()
+
+#                 while True:
+#                     value = struct.unpack_from("i", shm, offset=0)[0]
+#                     if value == 0:
+#                         break
+# 
                 shm.seek(0)
-                shm.write(struct.pack("iiii", WIDTH, HEIGHT, CHANNELS, idx))
-                shm.write(rgba.tobytes())
-
-                # print("size of the extra render is", render_extra.shape)
-                # print("size of the depth is", depth.shape)
-
-                # import matplotlib.pyplot as plt
-
-                # fig, axes = plt.subplots(1, 3, figsize=(20, 5))
-                # 
-                # # RGB
-                # axes[0].imshow(render_image[:3].permute(1,2,0).cpu().float().clamp(0,1).numpy())
-                # axes[0].set_title("RGB")
-                # 
-                # # Extra
-                # axes[1].imshow(render_extra[0].cpu().float().numpy(), cmap='viridis')
-                # axes[1].set_title("Extra")
-                # 
-                # # Depth
-                # depth_np = depth[0].cpu().float().numpy()
-                # axes[2].imshow(depth_np, cmap='plasma',
-                #                vmin=depth_np[depth_np > 0].min() if (depth_np > 0).any() else 0,
-                #                vmax=depth_np.max())
-                # axes[2].set_title("Depth")
-
-                # def format_coord(x, y):
-                #     col = int(x+0.5)
-                #     row = int(y+0.5)
-                #     if col>=0 and col< 512 and row>=0 and row< 512:
-                #         z = depth_np[row,col]
-                #         return 'x=%1.4f, y=%1.4f, z=%1.4f'%(x, y, z)
-                #     else:
-                #         return 'x=%1.4f, y=%1.4f'%(x, y)
-
-                # axes[2].format_coord = format_coord
-                # plt.show()
-                # gt_mask=target_info['mask'][0]
-                # gt_image=target_info['image'][0]*(gt_mask)+(1-gt_mask)*bg
-                # torchvision.utils.save_image(gt_image, os.path.join(out_gt_path, '{0:05d}'.format(idx) + ".png"))
-                # torchvision.utils.save_image(render_image, os.path.join(out_render_path, '{0:05d}'.format(idx) + ".png"))
-                # cat_image=torch.cat([gt_image,render_image],dim=2)
-                # rendering_imgs.append(to8b(cat_image.detach().cpu().numpy()))
-                
-            # rendering_imgs = np.stack(rendering_imgs, 0).transpose(0, 2, 3, 1)
-            # imageio.mimwrite(os.path.join(out_videoid_dir, f'{video_id}_video.mp4'), rendering_imgs, fps=30, quality=8)
-            # 
-            # render_speed=test_num/all_render_time #fps
-            # speed_info['infer_time (ms)']=infer_time*1000
-            # speed_info['render_speed (fps)']=render_speed
-            # with open(os.path.join(out_videoid_dir,'speed_info.json'), 'w') as f:
-            #     json.dump(speed_info, f)
+                shm.write(struct.pack("i", 1))
+                shm.write(position.tobytes())
+                shm.write(rotation.tobytes())
+                shm.write(scale.tobytes())
 
 def render_cross_set(meta_cfg,infer_model:Ubody_Gaussian_inferer,render_model:GaussianRenderer,source_dataset:TrackedData_infer,target_dataset:TrackedData_infer,dataset_name:str,root_path:str,args):
     out_dir=os.path.join(root_path,dataset_name,) 
