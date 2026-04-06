@@ -95,10 +95,18 @@ def render_set(meta_cfg,infer_model:Ubody_Gaussian_inferer,render_model:Gaussian
         # header:
         #   0: generating and writing gaussians
         #   1: finished generating and writing gaussians
+        
+        max_fps = 24
+        target_fps = 24 
+        target_frame_duration = 1.0 / target_fps
 
+        skip_amount = max_fps // target_fps
 
         while True:
             for idx,frame in tqdm(enumerate(frames[-test_num:])) :
+                if idx % skip_amount != 0:
+                    continue
+                start_time = time.perf_counter()
                 target_info = target_infos[idx]
 
                 gaussians=ubody_gaussians(target_info)
@@ -106,17 +114,16 @@ def render_set(meta_cfg,infer_model:Ubody_Gaussian_inferer,render_model:Gaussian
                 position = gaussians['xyz'].cpu().numpy()
                 rotation = gaussians['rotation'].cpu().numpy()
                 scale = gaussians['scaling'].cpu().numpy()
-
-#                 while True:
-#                     value = struct.unpack_from("i", shm, offset=0)[0]
-#                     if value == 0:
-#                         break
-# 
                 shm.seek(0)
                 shm.write(struct.pack("i", 1))
                 shm.write(position.tobytes())
                 shm.write(rotation.tobytes())
                 shm.write(scale.tobytes())
+                elapsed = time.perf_counter() - start_time
+                sleep_time = target_frame_duration - elapsed
+
+                if sleep_time > 0:
+                    time.sleep(sleep_time)
 
 def render_cross_set(meta_cfg,infer_model:Ubody_Gaussian_inferer,render_model:GaussianRenderer,source_dataset:TrackedData_infer,target_dataset:TrackedData_infer,dataset_name:str,root_path:str,args):
     out_dir=os.path.join(root_path,dataset_name,) 
@@ -135,33 +142,97 @@ def render_cross_set(meta_cfg,infer_model:Ubody_Gaussian_inferer,render_model:Ga
 
         out_sub_dir=os.path.join(out_dir,s_video_id)
         os.makedirs(out_sub_dir,exist_ok=True)
+
         for t_vidx,t_video_id in enumerate(t_video_ids):
             print(f'{t_video_id} [{t_vidx+1}/{len(t_video_ids)}]')
             out_videoid_dir=os.path.join(out_sub_dir,f'{s_video_id}_{t_video_id}')
+
+            #saving ply
+            ubody_gaussians.save_point_ply(out_videoid_dir)
+            ubody_gaussians.save_gaussian_ply(out_videoid_dir)
+
             out_render_path=os.path.join(out_videoid_dir,'render')
             os.makedirs(out_render_path,exist_ok=True)
             torchvision.utils.save_image(source_info['image'], os.path.join(out_videoid_dir,'source_image.png'))
             frames=target_dataset.videos_info[t_video_id]['frames_keys']
-            
             test_num=target_dataset.testing_split[t_video_id]
-            rendering_imgs=[]
+
+            # rendering_imgs=[]
+            # for idx,frame in tqdm(enumerate(frames[-test_num:])) :
+            #     target_info=target_dataset._load_target_info(t_video_id,frame)
+            #     target_info=change_id_info(target_info,source_info)
+            #     deform_gaussian_assets=ubody_gaussians(target_info)
+            #     if args.keep_source_cam:
+            #         render_cam_parms=source_info['render_cam_params']
+            #     else: render_cam_parms=target_info['render_cam_params']
+                
+            #     render_results=render_model(deform_gaussian_assets,render_cam_parms,bg=bg)
+ 
+            #     render_image=render_results['renders'][0]
+            #     gt_mask=target_info['mask'][0]
+            #     torchvision.utils.save_image(render_image, os.path.join(out_render_path, '{0:05d}'.format(idx) + ".png"))
+            #     rendering_imgs.append(to8b(render_image.detach().cpu().numpy()))
+                
+            # rendering_imgs = np.stack(rendering_imgs, 0).transpose(0, 2, 3, 1)
+            # imageio.mimwrite(os.path.join(out_videoid_dir, f'{s_video_id}_{t_video_id}_video.mp4'), rendering_imgs, fps=30, quality=8)
+            target_infos = []
             for idx,frame in tqdm(enumerate(frames[-test_num:])) :
                 target_info=target_dataset._load_target_info(t_video_id,frame)
-                target_info=change_id_info(target_info,source_info)
-                deform_gaussian_assets=ubody_gaussians(target_info)
-                if args.keep_source_cam:
-                    render_cam_parms=source_info['render_cam_params']
-                else: render_cam_parms=target_info['render_cam_params']
-                
-                render_results=render_model(deform_gaussian_assets,render_cam_parms,bg=bg)
- 
-                render_image=render_results['renders'][0]
-                gt_mask=target_info['mask'][0]
-                torchvision.utils.save_image(render_image, os.path.join(out_render_path, '{0:05d}'.format(idx) + ".png"))
-                rendering_imgs.append(to8b(render_image.detach().cpu().numpy()))
-                
-            rendering_imgs = np.stack(rendering_imgs, 0).transpose(0, 2, 3, 1)
-            imageio.mimwrite(os.path.join(out_videoid_dir, f'{s_video_id}_{t_video_id}_video.mp4'), rendering_imgs, fps=30, quality=8)
+                target_infos.append(target_info)
+
+
+            import mmap
+            import struct
+
+            N_GAUSSIANS = 204061
+            BYTES_FLOAT = 4
+
+            SIZE_XYZ = 3
+            SIZE_SCALE = 3
+            SIZE_ROT = 4
+
+            DATA_SIZE = (SIZE_XYZ + SIZE_SCALE + SIZE_ROT) * BYTES_FLOAT * N_GAUSSIANS
+
+            HEADER_SIZE = 4 
+
+            shm = mmap.mmap(-1, HEADER_SIZE + DATA_SIZE, tagname="SharedGaussians")
+
+            print("openning shared memory","SharedGaussians")
+            # header:
+            #   0: generating and writing gaussians
+            #   1: finished generating and writing gaussians
+            
+            max_fps = 24
+            target_fps = 24 
+            target_frame_duration = 1.0 / target_fps
+
+            skip_amount = max_fps // target_fps
+
+            while True:
+                for idx,frame in tqdm(enumerate(frames[-test_num:])) :
+                    if idx % skip_amount != 0:
+                        continue
+                    start_time = time.perf_counter()
+                    target_info = target_infos[idx]
+
+                    gaussians=ubody_gaussians(target_info)
+
+                    position = gaussians['xyz'].cpu().numpy()
+                    print(position.shape)
+                    rotation = gaussians['rotation'].cpu().numpy()
+                    scale = gaussians['scaling'].cpu().numpy()
+                    shm.seek(0)
+                    shm.write(struct.pack("i", 1))
+                    shm.write(position.tobytes())
+                    shm.write(rotation.tobytes())
+                    shm.write(scale.tobytes())
+                    elapsed = time.perf_counter() - start_time
+                    sleep_time = target_frame_duration - elapsed
+
+                    if sleep_time > 0:
+                        time.sleep(sleep_time)
+
+            
             
 def render_novel_views(meta_cfg,infer_model:Ubody_Gaussian_inferer,render_model:GaussianRenderer,dataset:TrackedData_infer,dataset_name:str,root_path:str,):
     #render norvel views for self-reenactment
