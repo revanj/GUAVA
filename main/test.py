@@ -202,64 +202,35 @@ def render_cross_set(meta_cfg,infer_model:Ubody_Gaussian_inferer,render_model:Ga
             #   0: generating and writing gaussians
             #   1: finished generating and writing gaussians
             
-            max_fps = 24
-            target_fps = 24 
+            max_fps = 30
+            target_fps = 30 
             target_frame_duration = 1.0 / target_fps
 
             skip_amount = max_fps // target_fps
 
-            rgb_alpha_stacked = []
+            while True:
+                for idx,frame in tqdm(enumerate(frames[-test_num:])) :
+                    if idx % skip_amount != 0:
+                        continue
+                    start_time = time.perf_counter()
+                    target_info = target_infos[idx]
 
-            for idx,frame in tqdm(enumerate(frames[-test_num:])) :
-                if idx % skip_amount != 0:
-                    continue
-                start_time = time.perf_counter()
-                target_info = target_infos[idx]
+                    gaussians=ubody_gaussians(target_info)
 
-                gaussians=ubody_gaussians(target_info)
+                    position = gaussians['xyz'].cpu().numpy()
+                    rotation = gaussians['rotation'].cpu().numpy()
+                    scale = gaussians['scaling'].cpu().numpy()
+                    shm.seek(0)
+                    shm.write(struct.pack("i", 1))
+                    shm.write(position.tobytes())
+                    shm.write(rotation.tobytes())
+                    shm.write(scale.tobytes())
+                    elapsed = time.perf_counter() - start_time
+                    sleep_time = target_frame_duration - elapsed
 
-                render_results=render_model(gaussians, target_info['render_cam_params'],bg=bg)
+                    if sleep_time > 0:
+                        time.sleep(sleep_time)
 
-                # render_image is [3, 512, 512]
-                render_image=render_results['renders'][0]
-                # depth is [1, 512, 512]
-                depth=render_results['depths'][0]
-                alpha = torch.ones_like(depth, device=depth.device)
-                alpha[depth < 0.06] = 0
-                rgba = torch.cat([render_image, alpha], dim=0).permute(1,2,0)                  # (4, 512, 512)
-                rgba = (rgba.clamp(0, 1) * 255).byte().cpu().numpy()
-
-                rgb   = rgba[:, :, :3]         # (H, W, 3)
-                alpha = rgba[:, :, 3:4]        # (H, W, 1)
-                alpha_rgb = np.repeat(alpha, 3, axis=2)   # grayscale alpha as RGB
-                stacked = np.concatenate([rgb, alpha_rgb], axis=0)  # (2H, W, 3)
-                rgb_alpha_stacked.append(stacked)
-
-                position = gaussians['xyz'].cpu().numpy()
-                rotation = gaussians['rotation'].cpu().numpy()
-                scale = gaussians['scaling'].cpu().numpy()
-                shm.seek(0)
-                shm.write(struct.pack("i", 1))
-                shm.write(position.tobytes())
-                shm.write(rotation.tobytes())
-                shm.write(scale.tobytes())
-                elapsed = time.perf_counter() - start_time
-                sleep_time = target_frame_duration - elapsed
-
-                if sleep_time > 0:
-                    time.sleep(sleep_time)
-
-            writer = imageio.get_writer(
-                "output_alpha_packed.mp4",
-                fps=20,
-                codec="libx264",
-                quality=9,
-                pixelformat="yuv420p"
-            )
-
-            for f in rgb_alpha_stacked:
-                writer.append_data(f)
-            writer.close()
             
 def render_novel_views(meta_cfg,infer_model:Ubody_Gaussian_inferer,render_model:GaussianRenderer,dataset:TrackedData_infer,dataset_name:str,root_path:str,):
     #render norvel views for self-reenactment
