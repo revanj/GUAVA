@@ -213,28 +213,43 @@ def render_cross_set(meta_cfg,infer_model:Ubody_Gaussian_inferer,render_model:Ga
 
             skip_amount = max_fps // target_fps
 
-            while True:
-                for idx,frame in tqdm(enumerate(frames[-test_num:])) :
-                    if idx % skip_amount != 0:
-                        continue
-                    start_time = time.perf_counter()
-                    target_info = target_infos[idx]
+            all_positions = []
+            all_rotations = []
+            all_scales    = []
 
-                    gaussians=ubody_gaussians(target_info)
+            for idx,frame in tqdm(enumerate(frames[-test_num:])) :
+                if idx % skip_amount != 0:
+                    continue
+                start_time = time.perf_counter()
+                target_info = target_infos[idx]
 
-                    position = gaussians['xyz'].cpu().numpy()
-                    rotation = gaussians['rotation'].cpu().numpy()
-                    scale = gaussians['scaling'].cpu().numpy()
-                    shm.seek(0)
-                    shm.write(struct.pack("i", 1))
-                    shm.write(position.tobytes())
-                    shm.write(rotation.tobytes())
-                    shm.write(scale.tobytes())
-                    elapsed = time.perf_counter() - start_time
-                    sleep_time = target_frame_duration - elapsed
+                gaussians=ubody_gaussians(target_info)
 
-                    if sleep_time > 0:
-                        time.sleep(sleep_time)
+                position = gaussians['xyz'].cpu().numpy()
+                rotation = gaussians['rotation'].cpu().numpy()
+                scale = gaussians['scaling'].cpu().numpy()
+
+                all_positions.append(position)
+                all_rotations.append(rotation)
+                all_scales.append(scale)
+
+                # shm.seek(0)
+                # shm.write(struct.pack("i", 1))
+                # shm.write(position.tobytes())
+                # shm.write(rotation.tobytes())
+                # shm.write(scale.tobytes())
+                # elapsed = time.perf_counter() - start_time
+                # sleep_time = target_frame_duration - elapsed
+
+                # if sleep_time > 0:
+                #     time.sleep(sleep_time)
+
+            np.savez_compressed(
+                "gaussians.npz",
+                position = np.stack(all_positions),   # (N, G, 3)
+                rotation = np.stack(all_rotations),   # (N, G, 4)  quaternion
+                scale    = np.stack(all_scales),      # (N, G, 3)
+            )
 
             
 def render_novel_views(meta_cfg,infer_model:Ubody_Gaussian_inferer,render_model:GaussianRenderer,dataset:TrackedData_infer,dataset_name:str,root_path:str,):
