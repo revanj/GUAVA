@@ -184,7 +184,12 @@ def render_cross_set(meta_cfg,infer_model:Ubody_Gaussian_inferer,render_model:Ga
             import mmap
             import struct
 
+            # normal
             N_GAUSSIANS = 204061
+            
+            # downsample
+            # N_GAUSSIANS = 203444
+
             BYTES_FLOAT = 4
 
             SIZE_XYZ = 3
@@ -202,8 +207,8 @@ def render_cross_set(meta_cfg,infer_model:Ubody_Gaussian_inferer,render_model:Ga
             #   0: generating and writing gaussians
             #   1: finished generating and writing gaussians
             
-            max_fps = 30
-            target_fps = 30 
+            max_fps = 24
+            target_fps = 24
             target_frame_duration = 1.0 / target_fps
 
             skip_amount = max_fps // target_fps
